@@ -328,7 +328,7 @@ async def aevaluate(
             client=client,
             blocking=blocking,
             experiment=experiment,
-            upload_results=upload_results,
+            upload_results=False,
         )
 
 
@@ -478,7 +478,7 @@ async def _aevaluate(
         runs=runs,
         include_attachments=num_include_attachments > 0,
         reuse_attachments=num_repetitions * num_include_attachments > 1,
-        upload_results=upload_results,
+        upload_results=False,
     ).astart()
     cache_dir = ls_utils.get_cache_dir(None)
     if cache_dir is not None:
@@ -581,7 +581,7 @@ class _AsyncExperimentManager(_ExperimentManagerMixin):
         self._num_repetitions = num_repetitions
         self._include_attachments = include_attachments
         self._reuse_attachments = reuse_attachments
-        self._upload_results = upload_results
+        self._upload_results = False
         self._attachment_raw_data_dict = attachment_raw_data_dict
 
     def _reset_example_attachments(self, example: schemas.Example) -> schemas.Example:

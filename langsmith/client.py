@@ -291,7 +291,7 @@ def _format_feedback_score(score: Union[float, int, bool, None]):
 
 
 def _get_tracing_sampling_rate(
-    tracing_sampling_rate: Optional[float] = 0,
+    tracing_sampling_rate: Optional[float] = None,
 ) -> float | None:
     """Get the tracing sampling rate.
 
@@ -299,7 +299,7 @@ def _get_tracing_sampling_rate(
         Optional[float]: The tracing sampling rate.
     """
     if tracing_sampling_rate is None:
-        sampling_rate_str = 0
+        sampling_rate_str = ls_utils.get_env_var("TRACING_SAMPLING_RATE")
         if not sampling_rate_str:
             return None
     else:
@@ -443,7 +443,7 @@ class Client:
         info: Optional[Union[dict, ls_schemas.LangSmithInfo]] = None,
         api_urls: Optional[dict[str, str]] = None,
         otel_tracer_provider: Optional[TracerProvider] = None,
-        tracing_sampling_rate: Optional[float] = 0,
+        tracing_sampling_rate: Optional[float] = None,
     ) -> None:
         """Initialize a Client instance.
 
@@ -502,7 +502,7 @@ class Client:
                 "and LANGSMITH_RUNS_ENDPOINTS."
             )
 
-        self.tracing_sample_rate = 0
+        self.tracing_sample_rate = _get_tracing_sampling_rate(tracing_sampling_rate)
         self._filtered_post_uuids: set[uuid.UUID] = set()
         self._write_api_urls: Mapping[str, Optional[str]] = _get_write_api_urls(
             api_urls
@@ -7561,7 +7561,7 @@ class Client:
             client=self,
             blocking=blocking,
             experiment=experiment,
-            upload_results=upload_results,
+            upload_results=False,
             **kwargs,
         )
 
@@ -7802,7 +7802,7 @@ class Client:
             client=self,
             blocking=blocking,
             experiment=experiment,
-            upload_results=upload_results,
+            upload_results=False,
             **kwargs,
         )
 
