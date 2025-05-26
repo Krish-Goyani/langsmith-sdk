@@ -209,24 +209,16 @@ class DynamicRunEvaluator(RunEvaluator):
             func (Callable): A function that takes a `Run` and an optional `Example` as
             arguments, and returns a dict or `ComparisonEvaluationResult`.
         """
-        (func, prepare_inputs) = _normalize_evaluator_func(func)
+        func = _normalize_evaluator_func(func)
         if afunc:
-            (afunc, prepare_inputs) = _normalize_evaluator_func(afunc)  # type: ignore[assignment]
-
-        def process_inputs(inputs: dict) -> dict:
-            if prepare_inputs is None:
-                return inputs
-            (_, _, traced_inputs) = prepare_inputs(
-                inputs.get("run"), inputs.get("example")
-            )
-            return traced_inputs
+            afunc = _normalize_evaluator_func(afunc)  # type: ignore[assignment]
 
         wraps(func)(self)
         from langsmith import run_helpers  # type: ignore
 
         if afunc is not None:
             self.afunc = run_helpers.ensure_traceable(
-                afunc, process_inputs=process_inputs
+                afunc, process_inputs=_serialize_inputs
             )
             self._name = getattr(afunc, "__name__", "DynamicRunEvaluator")
         if inspect.iscoroutinefunction(func):
@@ -237,13 +229,13 @@ class DynamicRunEvaluator(RunEvaluator):
                     "function to avoid ambiguity."
                 )
             self.afunc = run_helpers.ensure_traceable(
-                func, process_inputs=process_inputs
+                func, process_inputs=_serialize_inputs
             )
             self._name = getattr(func, "__name__", "DynamicRunEvaluator")
         else:
             self.func = run_helpers.ensure_traceable(
                 cast(Callable[[Run, Optional[Example]], _RUNNABLE_OUTPUT], func),
-                process_inputs=process_inputs,
+                process_inputs=_serialize_inputs,
             )
             self._name = getattr(func, "__name__", "DynamicRunEvaluator")
 
@@ -432,6 +424,12 @@ def _maxsize_repr(obj: Any):
     return s
 
 
+def _serialize_inputs(inputs: dict) -> dict:
+    run_truncated = _maxsize_repr(inputs.get("run"))
+    example_truncated = _maxsize_repr(inputs.get("example"))
+    return {"run": run_truncated, "example": example_truncated}
+
+
 class DynamicComparisonRunEvaluator:
     """Compare predictions (as traces) from 2 or more runs."""
 
@@ -455,24 +453,16 @@ class DynamicComparisonRunEvaluator:
             func (Callable): A function that takes a `Run` and an optional `Example` as
             arguments, and returns an `EvaluationResult` or `EvaluationResults`.
         """
-        (func, prepare_inputs) = _normalize_comparison_evaluator_func(func)
+        func = _normalize_comparison_evaluator_func(func)
         if afunc:
-            (afunc, prepare_inputs) = _normalize_comparison_evaluator_func(afunc)  # type: ignore[assignment]
-
-        def process_inputs(inputs: dict) -> dict:
-            if prepare_inputs is None:
-                return inputs
-            (_, _, traced_inputs) = prepare_inputs(
-                inputs.get("runs"), inputs.get("example")
-            )
-            return traced_inputs
+            afunc = _normalize_comparison_evaluator_func(afunc)  # type: ignore[assignment]
 
         wraps(func)(self)
         from langsmith import run_helpers  # type: ignore
 
         if afunc is not None:
             self.afunc = run_helpers.ensure_traceable(
-                afunc, process_inputs=process_inputs
+                afunc, process_inputs=_serialize_inputs
             )
             self._name = getattr(afunc, "__name__", "DynamicRunEvaluator")
         if inspect.iscoroutinefunction(func):
@@ -483,7 +473,7 @@ class DynamicComparisonRunEvaluator:
                     "function to avoid ambiguity."
                 )
             self.afunc = run_helpers.ensure_traceable(
-                func, process_inputs=process_inputs
+                func, process_inputs=_serialize_inputs
             )
             self._name = getattr(func, "__name__", "DynamicRunEvaluator")
         else:
@@ -495,7 +485,7 @@ class DynamicComparisonRunEvaluator:
                     ],
                     func,
                 ),
-                process_inputs=process_inputs,
+                process_inputs=_serialize_inputs,
             )
             self._name = getattr(func, "__name__", "DynamicRunEvaluator")
 
@@ -648,12 +638,9 @@ def comparison_evaluator(
 
 def _normalize_evaluator_func(
     func: Callable,
-) -> tuple[
-    Union[
-        Callable[[Run, Optional[Example]], _RUNNABLE_OUTPUT],
-        Callable[[Run, Optional[Example]], Awaitable[_RUNNABLE_OUTPUT]],
-    ],
-    Optional[Callable[..., dict]],
+) -> Union[
+    Callable[[Run, Optional[Example]], _RUNNABLE_OUTPUT],
+    Callable[[Run, Optional[Example]], Awaitable[_RUNNABLE_OUTPUT]],
 ]:
     supported_args = (
         "run",
@@ -691,13 +678,13 @@ def _normalize_evaluator_func(
         "run",
         "example",
     ]:
-        return func, None
+        return func
     else:
         if inspect.iscoroutinefunction(func):
 
-            def _prepare_inputs(
+            async def awrapper(
                 run: Run, example: Optional[Example]
-            ) -> tuple[list, dict, dict]:
+            ) -> _RUNNABLE_OUTPUT:
                 arg_map = {
                     "run": run,
                     "example": example,
@@ -708,7 +695,6 @@ def _normalize_evaluator_func(
                 }
                 kwargs = {}
                 args = []
-                traced_inputs = {}
                 for param_name, param in sig.parameters.items():
                     # Could have params with defaults that are not in the arg map
                     if param_name in arg_map:
@@ -719,17 +705,6 @@ def _normalize_evaluator_func(
                             args.append(arg_map[param_name])
                         else:
                             kwargs[param_name] = arg_map[param_name]
-                        traced_inputs[param_name] = (
-                            _maxsize_repr(arg_map[param_name])
-                            if param_name in ("run", "example")
-                            else arg_map[param_name]
-                        )
-                return args, kwargs, traced_inputs
-
-            async def awrapper(
-                run: Run, example: Optional[Example]
-            ) -> _RUNNABLE_OUTPUT:
-                (args, kwargs, _) = _prepare_inputs(run, example)
                 return await func(*args, **kwargs)
 
             awrapper.__name__ = (
@@ -737,13 +712,11 @@ def _normalize_evaluator_func(
                 if hasattr(func, "__name__")
                 else awrapper.__name__
             )
-            return (awrapper, _prepare_inputs)  # type: ignore[return-value]
+            return awrapper  # type: ignore[return-value]
 
         else:
 
-            def _prepare_inputs(
-                run: Run, example: Optional[Example]
-            ) -> tuple[list, dict, dict]:
+            def wrapper(run: Run, example: Optional[Example]) -> _RUNNABLE_OUTPUT:
                 arg_map = {
                     "run": run,
                     "example": example,
@@ -754,7 +727,6 @@ def _normalize_evaluator_func(
                 }
                 kwargs = {}
                 args = []
-                traced_inputs = {}
                 for param_name, param in sig.parameters.items():
                     # Could have params with defaults that are not in the arg map
                     if param_name in arg_map:
@@ -765,15 +737,7 @@ def _normalize_evaluator_func(
                             args.append(arg_map[param_name])
                         else:
                             kwargs[param_name] = arg_map[param_name]
-                        traced_inputs[param_name] = (
-                            _maxsize_repr(arg_map[param_name])
-                            if param_name in ("run", "example")
-                            else arg_map[param_name]
-                        )
-                return args, kwargs, traced_inputs
 
-            def wrapper(run: Run, example: Optional[Example]) -> _RUNNABLE_OUTPUT:
-                (args, kwargs, _) = _prepare_inputs(run, example)
                 return func(*args, **kwargs)
 
             wrapper.__name__ = (
@@ -781,17 +745,14 @@ def _normalize_evaluator_func(
                 if hasattr(func, "__name__")
                 else wrapper.__name__
             )
-            return (wrapper, _prepare_inputs)  # type: ignore[return-value]
+            return wrapper  # type: ignore[return-value]
 
 
 def _normalize_comparison_evaluator_func(
     func: Callable,
-) -> tuple[
-    Union[
-        Callable[[Sequence[Run], Optional[Example]], _COMPARISON_OUTPUT],
-        Callable[[Sequence[Run], Optional[Example]], Awaitable[_COMPARISON_OUTPUT]],
-    ],
-    Optional[Callable[..., dict]],
+) -> Union[
+    Callable[[Sequence[Run], Optional[Example]], _COMPARISON_OUTPUT],
+    Callable[[Sequence[Run], Optional[Example]], Awaitable[_COMPARISON_OUTPUT]],
 ]:
     supported_args = ("runs", "example", "inputs", "outputs", "reference_outputs")
     sig = inspect.signature(func)
@@ -822,13 +783,13 @@ def _normalize_comparison_evaluator_func(
         "runs",
         "example",
     ]:
-        return func, None
+        return func
     else:
         if inspect.iscoroutinefunction(func):
 
-            def _prepare_inputs(
+            async def awrapper(
                 runs: Sequence[Run], example: Optional[Example]
-            ) -> tuple[list, dict, dict]:
+            ) -> _COMPARISON_OUTPUT:
                 arg_map = {
                     "runs": runs,
                     "example": example,
@@ -838,7 +799,6 @@ def _normalize_comparison_evaluator_func(
                 }
                 kwargs = {}
                 args = []
-                traced_inputs = {}
                 for param_name, param in sig.parameters.items():
                     # Could have params with defaults that are not in the arg map
                     if param_name in arg_map:
@@ -849,17 +809,6 @@ def _normalize_comparison_evaluator_func(
                             args.append(arg_map[param_name])
                         else:
                             kwargs[param_name] = arg_map[param_name]
-                        traced_inputs[param_name] = (
-                            _maxsize_repr(arg_map[param_name])
-                            if param_name in ("runs", "example")
-                            else arg_map[param_name]
-                        )
-                return args, kwargs, traced_inputs
-
-            async def awrapper(
-                runs: Sequence[Run], example: Optional[Example]
-            ) -> _COMPARISON_OUTPUT:
-                (args, kwargs, _) = _prepare_inputs(runs, example)
                 return await func(*args, **kwargs)
 
             awrapper.__name__ = (
@@ -867,13 +816,13 @@ def _normalize_comparison_evaluator_func(
                 if hasattr(func, "__name__")
                 else awrapper.__name__
             )
-            return awrapper, _prepare_inputs  # type: ignore[return-value]
+            return awrapper  # type: ignore[return-value]
 
         else:
 
-            def _prepare_inputs(
+            def wrapper(
                 runs: Sequence[Run], example: Optional[Example]
-            ) -> tuple[list, dict, dict]:
+            ) -> _COMPARISON_OUTPUT:
                 arg_map = {
                     "runs": runs,
                     "example": example,
@@ -883,7 +832,6 @@ def _normalize_comparison_evaluator_func(
                 }
                 kwargs = {}
                 args = []
-                traced_inputs = {}
                 for param_name, param in sig.parameters.items():
                     # Could have params with defaults that are not in the arg map
                     if param_name in arg_map:
@@ -894,17 +842,7 @@ def _normalize_comparison_evaluator_func(
                             args.append(arg_map[param_name])
                         else:
                             kwargs[param_name] = arg_map[param_name]
-                        traced_inputs[param_name] = (
-                            _maxsize_repr(arg_map[param_name])
-                            if param_name in ("runs", "example")
-                            else arg_map[param_name]
-                        )
-                return args, kwargs, traced_inputs
 
-            def wrapper(
-                runs: Sequence[Run], example: Optional[Example]
-            ) -> _COMPARISON_OUTPUT:
-                (args, kwargs, _) = _prepare_inputs(runs, example)
                 return func(*args, **kwargs)
 
             wrapper.__name__ = (
@@ -912,7 +850,7 @@ def _normalize_comparison_evaluator_func(
                 if hasattr(func, "__name__")
                 else wrapper.__name__
             )
-            return wrapper, _prepare_inputs  # type: ignore[return-value]
+            return wrapper  # type: ignore[return-value]
 
 
 def _format_evaluator_result(

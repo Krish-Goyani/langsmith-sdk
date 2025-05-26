@@ -7561,7 +7561,7 @@ class Client:
             client=self,
             blocking=blocking,
             experiment=experiment,
-            upload_results=upload_results,
+            upload_results=False,
             **kwargs,
         )
 
@@ -7802,7 +7802,7 @@ class Client:
             client=self,
             blocking=blocking,
             experiment=experiment,
-            upload_results=upload_results,
+            upload_results=False,
             **kwargs,
         )
 
