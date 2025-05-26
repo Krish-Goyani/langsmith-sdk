@@ -2,3 +2,4 @@ out
 profiles
 notebooks
 .venv
+__pycache__

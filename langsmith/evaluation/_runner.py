@@ -428,7 +428,7 @@ def evaluate(
             client=client,
             blocking=blocking,
             experiment=experiment,
-            upload_results=False,
+            upload_results=upload_results,
         )
 
 
@@ -1056,7 +1056,7 @@ def _evaluate(
         runs=runs,
         # Create or resolve the experiment.
         include_attachments=_include_attachments(target, evaluators),
-        upload_results=False,
+        upload_results=upload_results,
     ).start()
     cache_dir = ls_utils.get_cache_dir(None)
     cache_path = (
@@ -1325,7 +1325,7 @@ class _ExperimentManager(_ExperimentManagerMixin):
         self._num_repetitions = num_repetitions
         self._include_attachments = include_attachments
         self._reuse_attachments = reuse_attachments
-        self._upload_results = False
+        self._upload_results = upload_results
         self._attachment_raw_data_dict = attachment_raw_data_dict
 
     def _reset_example_attachment_readers(
